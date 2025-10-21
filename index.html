@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reverie Book Designer</title>
+    <!-- PDF Generation Libraries -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+
+    <style>
+        /* CSS updated for smart borders on photo slots */
+        :root {
+            --primary-color: #2c3e50;
+            --secondary-color: #81a4cd;
+            --background-color: #f8f9fa;
+            --text-color: #34495e;
+            --font-headings: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            --font-body: 'Georgia', serif;
+            --gap: 0px; /* Keeping gap at 0 for seamless photo edges */
+        }
+        html { scroll-behavior: smooth; }
+        body { font-family: var(--font-body); color: var(--text-color); background-color: var(--background-color); margin: 0; padding-top: 80px; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 0 20px; }
+        h2 { font-size: 1.8em; border-bottom: 1px solid #e0e0e0; padding-bottom: 10px; margin-bottom: 25px; font-family: var(--font-headings); color: var(--primary-color); font-weight: 300; }
+        .main-header { background: #fff; padding: 15px 0; position: fixed; width: 100%; top: 0; left: 0; z-index: 1000; box-shadow: 0 2px 10px rgba(0,0,0,0.05); }
+        .main-header .container { display: flex; justify-content: space-between; align-items: center; }
+        .logo { font-family: var(--font-headings); font-size: 1.8em; font-weight: bold; color: var(--primary-color); text-decoration: none; }
+        #setup-screen { text-align: center; padding: 60px 20px; }
+        .setup-box { background: #fff; padding: 40px; border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); display: inline-block; }
+        #page-count-input { width: 100px; text-align: center; font-size: 1.2em; padding: 10px; margin: 0 15px; }
+        .btn { display: inline-block; background-color: var(--primary-color); color: #fff; padding: 12px 28px; text-decoration: none; border-radius: 5px; cursor: pointer; border: none; font-size: 1em; }
+        #editor-screen { display: none; }
+        .editor-grid { display: grid; grid-template-columns: 250px 1fr; gap: 30px; }
+        .left-panel { background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); }
+        #photo-tray { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; max-height: 70vh; overflow-y: auto;   /* Adds a VERTICAL scrollbar when content overflows */
+        padding-right: 5px; /* Adds a little space for the scrollbar */ }
+        .tray-thumbnail {
+        width: 100%;    /* Fills the column width */
+        height: auto;   /* Height adjusts automatically */
+        object-fit: contain;
+        border-radius: 4px;
+        cursor: pointer;
+    }
+        #page-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 20px; }
+        .page-thumbnail { background: #fff; aspect-ratio: 210 / 297; border: 1px solid #ddd; border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); cursor: pointer; transition: transform 0.2s, box-shadow 0.2s; display: flex; gap: var(--gap); }
+        .page-thumbnail:hover { transform: scale(1.03); box-shadow: 0 4px 15px rgba(0,0,0,0.15); }
+        .page-thumbnail-placeholder { justify-content: center; align-items: center; color: #aaa; }
+        .modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); z-index: 2000; display: none; justify-content: center; align-items: center; }
+        .modal-content { background: #fff; padding: 30px; border-radius: 8px; text-align: center; }
+        .modal.active { display: flex; }
+        #layout-options, #photo-picker-options { display: flex; gap: 20px; margin-top: 20px; flex-wrap: wrap; justify-content: center; }
+        .layout-option { width: 80px; height: 110px; border: 2px solid #ccc; display: flex; cursor: pointer; flex-shrink: 0; gap: 2px; padding: 2px; }
+        .layout-option:hover { border-color: var(--primary-color); }
+        .layout-option .photo-slot { background: #e9eef3; border: none !important; } /* Preview slots in modal have no border */
+        #photo-picker-options .tray-thumbnail {
+        width: 100px;
+        height: 100px;
+        flex-shrink: 0;
+    }
+        
+        /* --- NEW: SMART BORDER STYLES --- */
+        .photo-slot {
+            background-size: cover;
+            background-position: center;
+            box-sizing: border-box;
+            /* Default state: empty slots have a thin border */
+            border: 1px solid #dde3ea;
+        }
+        /* Filled state: slots with a photo have no border */
+        .photo-slot.has-photo {
+            border: none;
+        }
+
+        /* --- All layout styles are now simpler as they don't need calc() --- */
+        .layout-1 .photo-slot { width: 100%; height: 100%; }
+        .layout-2-horiz { flex-direction: row; }
+        .layout-2-horiz .photo-slot { width: 50%; height: 100%; }
+        .layout-2-vert { flex-direction: column; }
+        .layout-2-vert .photo-slot { width: 100%; height: 50%; }
+        .layout-3-main-top { flex-wrap: wrap; }
+        .layout-3-main-top .photo-slot:first-child { width: 100%; height: 50%; }
+        .layout-3-main-top .photo-slot { width: 50%; height: 50%; }
+        .layout-3-main-left { flex-wrap: nowrap; }
+        .layout-3-main-left .photo-slot:first-child { width: 50%; height: 100%; }
+        .layout-3-main-left .sub-column { width: 50%; height: 100%; display: flex; flex-direction: column; }
+        .layout-3-main-left .sub-column .photo-slot { width: 100%; height: 50%; }
+        .layout-4-grid { flex-wrap: wrap; }
+        .layout-4-grid .photo-slot { width: 50%; height: 50%; }
+        .layout-4-vert-strip { flex-direction: column; }
+        .layout-4-vert-strip .photo-slot { width: 100%; height: 25%; }
+
+        /* --- LAYOUT PREVIEW FIXES (for modal window) --- */
+/* These rules adjust the size of photo slots inside the small previews
+   to account for the 2px gap between them, ensuring they fit perfectly. */
+.layout-option.layout-2-horiz .photo-slot { width: calc(50% - 1px); }
+.layout-option.layout-2-vert .photo-slot { height: calc(50% - 1px); }
+.layout-option.layout-3-main-top .photo-slot { height: calc(50% - 1px); }
+.layout-option.layout-3-main-top .photo-slot:not(:first-child) { width: calc(50% - 1px); }
+.layout-option.layout-3-main-left > .photo-slot:first-child,
+.layout-option.layout-3-main-left > .sub-column { width: calc(50% - 1px); }
+.layout-option.layout-3-main-left .sub-column .photo-slot { height: calc(50% - 1px); }
+.layout-option.layout-4-grid .photo-slot {
+    width: calc(50% - 1px);
+    height: calc(50% - 1px);
+}
+.layout-option.layout-4-vert-strip .photo-slot {
+    /* 4 items have 3 gaps. Total gap height is 2px * 3 = 6px.
+       Each slot's height is (100% - 6px) / 4 */
+    height: calc(25% - 1.5px);
+}
+
+        @media (max-width: 992px) {
+    body {
+        padding-top: 70px;
+    }
+    .editor-grid {
+        grid-template-columns: 1fr; /* Stack the columns */
+    }
+
+    /* Redesigned photo tray for mobile */
+    #photo-tray {
+        display: flex;          /* Use flexbox for horizontal layout */
+        flex-wrap: wrap;        /* Allow photos to wrap to a second line */
+        overflow-x: auto; /* Adds a HORIZONTAL scrollbar */
+        overflow-y: hidden;     /* Hide vertical scrollbar */
+        align-content: flex-start;
+        max-height: 190px;      /* Set max height to roughly 2 rows of photos */
+    }
+    .tray-thumbnail {
+            height: 90px;   /* Constrain the height */
+            width: auto;    /* Allow width to adjust automatically */
+            flex-shrink: 0;
+        }
+    .left-panel {
+        max-height: none;       /* Remove previous height limit */
+    }
+
+    /* Force two page-grid columns on mobile */
+    #page-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 15px;
+    }
+    
+    h2 {
+        font-size: 1.5em;
+    }
+    .modal-content {
+        width: 90%;
+        padding: 20px;
+    }
+    
+    /* --- THIS IS THE FIX --- */
+    #layout-options {
+        flex-wrap: wrap;           /* Allow items to wrap to the next line */
+        justify-content: center;   /* Center the items nicely */
+        overflow-x: hidden;        /* Hide the horizontal scrollbar */
+        padding-bottom: 15px;
+    }
+}
+    </style>
+</head>
+<body>
+    <header class="main-header"><div class="container"><a href="#" class="logo">Reverie Designer</a></div></header>
+    
+    <div id="setup-screen" class="container"><div class="setup-box">
+            <h2>Welcome to the Reverie Designer</h2>
+            <p>How many pages will be in your photobook?</p>
+            <label for="page-count-input">Pages:</label>
+            <input type="number" id="page-count-input" value="20" min="2" max="100" step="2">
+            <button id="start-btn" class="btn">Start Designing</button>
+        </div>
+    </div>
+
+    <div id="editor-screen" class="container"><div class="editor-grid">
+            <div class="left-panel">
+                <h2>Your Photos</h2>
+                <input type="file" id="photos-upload" accept="image/*" multiple><hr>
+                <div id="photo-tray"></div>
+            </div>
+            <div class="main-panel">
+                <h2>Your Book Layout</h2>
+                <button id="export-pdf-btn" class="btn">Export to PDF</button>
+                <div id="page-grid"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="layout-modal" class="modal"><div class="modal-content">
+            <h3>Choose a Layout for Your Page</h3>
+            <div id="layout-options"></div>
+        </div>
+    </div>
+    
+    <div id="photo-picker-modal" class="modal"><div class="modal-content">
+            <h3>Select a Photo</h3>
+            <div id="photo-picker-options" style="flex-wrap: wrap; max-width: 500px; max-height: 400px; overflow-y: auto;"></div>
+        </div>
+    </div>
+
+    <script>
+        // --- STATE & DOM (unchanged) ---
+        let bookPages = [];
+        const fileDataMap = new Map();
+        let idCounter = 0;
+        let activePageIndex = null;
+        let activeSlotId = null;
+        const setupScreen = document.getElementById('setup-screen');
+        const editorScreen = document.getElementById('editor-screen');
+        const startBtn = document.getElementById('start-btn');
+        const pageCountInput = document.getElementById('page-count-input');
+        const pageGrid = document.getElementById('page-grid');
+        const photosUpload = document.getElementById('photos-upload');
+        const photoTray = document.getElementById('photo-tray');
+        const layoutModal = document.getElementById('layout-modal');
+        const layoutOptionsContainer = document.getElementById('layout-options');
+        const photoPickerModal = document.getElementById('photo-picker-modal');
+        const photoPickerOptions = document.getElementById('photo-picker-options');
+
+        const layouts = { /* Unchanged */ 
+            'layout-1': { slots: 1, html: `<div class="photo-slot" data-slot-id="1"></div>` },
+            'layout-2-horiz': { slots: 2, html: `<div class="photo-slot" data-slot-id="1"></div><div class="photo-slot" data-slot-id="2"></div>` },
+            'layout-2-vert': { slots: 2, html: `<div class="photo-slot" data-slot-id="1"></div><div class="photo-slot" data-slot-id="2"></div>` },
+            'layout-3-main-top': { slots: 3, html: `<div class="photo-slot" data-slot-id="1"></div><div class="photo-slot" data-slot-id="2"></div><div class="photo-slot" data-slot-id="3"></div>` },
+            'layout-3-main-left': { slots: 3, html: `<div class="photo-slot" data-slot-id="1"></div><div class="sub-column"><div class="photo-slot" data-slot-id="2"></div><div class="photo-slot" data-slot-id="3"></div></div>` },
+            'layout-4-grid': { slots: 4, html: `<div class="photo-slot" data-slot-id="1"></div><div class="photo-slot" data-slot-id="2"></div><div class="photo-slot" data-slot-id="3"></div><div class="photo-slot" data-slot-id="4"></div>` },
+            'layout-4-vert-strip': { slots: 4, html: `<div class="photo-slot" data-slot-id="1"></div><div class="photo-slot" data-slot-id="2"></div><div class="photo-slot" data-slot-id="3"></div><div class="photo-slot" data-slot-id="4"></div>` }
+        };
+
+        // --- Core Functions ---
+        startBtn.addEventListener('click', () => { /* Unchanged */
+            const pageCount = parseInt(pageCountInput.value);
+            if (pageCount > 0 && pageCount % 2 === 0) {
+                initializeBook(pageCount);
+                setupScreen.style.display = 'none';
+                editorScreen.style.display = 'block';
+            } else { alert("Please enter an even number of pages."); }
+        });
+        function initializeBook(pageCount) { /* Unchanged */
+            bookPages = Array(pageCount).fill(null).map(() => ({ layout: null, photos: {} }));
+            renderPageGrid();
+            populateLayoutOptions();
+        }
+        photosUpload.addEventListener('change', (event) => { /* Unchanged */
+            const newFiles = Array.from(event.target.files);
+            newFiles.forEach(file => {
+                const id = `photo-${idCounter++}`;
+                const fileURL = URL.createObjectURL(file);
+                fileDataMap.set(id, { file, url: fileURL });
+                const img = document.createElement('img');
+                img.src = fileURL;
+                img.className = 'tray-thumbnail';
+                img.dataset.id = id;
+                photoTray.appendChild(img);
+            });
+        });
+        
+        // --- THIS FUNCTION CONTAINS THE KEY CHANGE ---
+        function renderPageGrid() {
+            pageGrid.innerHTML = '';
+            bookPages.forEach((page, index) => {
+                const pageThumb = document.createElement('div');
+                pageThumb.className = 'page-thumbnail';
+                if (page.layout) {
+                    pageThumb.innerHTML = layouts[page.layout].html;
+                    pageThumb.classList.add(page.layout);
+                    
+                    // Populate with photos
+                    for (const [slotId, photoId] of Object.entries(page.photos)) {
+                        const slot = pageThumb.querySelector(`[data-slot-id="${slotId}"]`);
+                        if (slot && fileDataMap.has(photoId)) {
+                            slot.style.backgroundImage = `url(${fileDataMap.get(photoId).url})`;
+                            // --- JAVASCRIPT FIX ---
+                            // Add the .has-photo class to hide the border
+                            slot.classList.add('has-photo');
+                        }
+                    }
+                } else {
+                    pageThumb.classList.add('page-thumbnail-placeholder');
+                    pageThumb.textContent = `Page ${index + 1}`;
+                }
+                
+                // Event listeners remain the same
+                pageThumb.addEventListener('click', () => openLayoutChooser(index));
+                pageThumb.querySelectorAll('.photo-slot').forEach(slot => {
+                    slot.addEventListener('click', (event) => {
+                        event.stopPropagation();
+                        openPhotoPicker(index, slot.dataset.slotId);
+                    });
+                });
+                pageGrid.appendChild(pageThumb);
+            });
+        }
+        
+        function populateLayoutOptions() { /* Unchanged */
+            layoutOptionsContainer.innerHTML = '';
+            for (const [key, value] of Object.entries(layouts)) {
+                const option = document.createElement('div');
+                option.className = `layout-option ${key}`;
+                // To make previews cleaner, we add the gap here just for the visual
+                option.style.gap = '2px';
+                option.innerHTML = value.html;
+                option.onclick = () => selectLayout(key);
+                layoutOptionsContainer.appendChild(option);
+            }
+        }
+        function openLayoutChooser(index) { /* Unchanged */
+            activePageIndex = index;
+            layoutModal.classList.add('active');
+        }
+        function selectLayout(layoutKey) { /* Unchanged */
+            if (activePageIndex !== null) {
+                bookPages[activePageIndex].layout = layoutKey;
+                bookPages[activePageIndex].photos = {};
+                renderPageGrid();
+            }
+            layoutModal.classList.remove('active');
+        }
+        function openPhotoPicker(pageIndex, slotId) { /* Unchanged */
+            activePageIndex = pageIndex;
+            activeSlotId = slotId;
+            populatePhotoPicker();
+            photoPickerModal.classList.add('active');
+        }
+        function populatePhotoPicker() { /* Unchanged */
+            photoPickerOptions.innerHTML = '';
+            for (const [id, data] of fileDataMap.entries()) {
+                const img = document.createElement('img');
+                img.src = data.url;
+                img.className = 'tray-thumbnail';
+                img.onclick = () => selectPhoto(id);
+                photoPickerOptions.appendChild(img);
+            }
+        }
+        function selectPhoto(photoId) { /* Unchanged */
+            if (activePageIndex !== null && activeSlotId !== null) {
+                bookPages[activePageIndex].photos[activeSlotId] = photoId;
+                renderPageGrid();
+            }
+            photoPickerModal.classList.remove('active');
+        }
+        [layoutModal, photoPickerModal].forEach(modal => { /* Unchanged */
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) modal.classList.remove('active');
+            });
+        });
+        // --- PDF EXPORT FUNCTIONALITY ---
+
+// Add this line to your variables at the top of the script
+const exportPdfBtn = document.getElementById('export-pdf-btn');
+
+// Add this function and the event listener at the end of your script
+async function exportToPdf() {
+    exportPdfBtn.disabled = true;
+    exportPdfBtn.textContent = 'Exporting...';
+    
+    try {
+        const { jsPDF } = window.jspdf;
+        // A4 size in points: 595 x 842.
+        const pdfWidth = 595;
+        const pdfHeight = 842;
+
+        const doc = new jsPDF('p', 'pt', 'a4');
+        const pageElements = document.querySelectorAll('.page-thumbnail');
+
+        for (let i = 0; i < pageElements.length; i++) {
+            const originalPage = pageElements[i];
+            
+            // --- HIGH-QUALITY EXPORT STRATEGY ---
+            // 1. Create a large, off-screen clone of the page to render images at high resolution.
+            const clone = originalPage.cloneNode(true);
+            document.body.appendChild(clone);
+            clone.style.position = 'absolute';
+            clone.style.left = '-9999px'; // Move it off-screen
+            clone.style.top = '0px';
+            clone.style.width = '1600px';  // A large width to force high-res rendering
+            clone.style.height = '2262px'; // Maintain the new A4 aspect ratio (1600 * 297/210)
+            clone.style.margin = '0';
+            clone.style.border = 'none';
+            clone.style.boxShadow = 'none';
+
+            // 2. Run html2canvas on the high-resolution clone
+            const canvas = await html2canvas(clone, {
+                scale: 1, // No need for extra scaling as the source element is already large
+                useCORS: true,
+                logging: false,
+                onclone: (clonedDoc) => {
+                    // Ensure remove buttons are not visible in the PDF screenshot of the clone
+                    const removeButtons = clonedDoc.querySelectorAll('.remove-photo-btn');
+                    removeButtons.forEach(btn => btn.style.display = 'none');
+                }
+            });
+
+            // 3. Remove the temporary clone from the DOM
+            document.body.removeChild(clone);
+
+            // Use PNG for lossless compression to preserve quality
+            const imgData = canvas.toDataURL('image/png');
+
+            if (i > 0) {
+                doc.addPage();
+            }
+            // Add image to fill the entire page, removing margins and borders
+            doc.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+        }
+        doc.save('reverie-photobook.pdf');
+    } catch (error) {
+        console.error("Failed to export PDF:", error);
+        alert("Sorry, something went wrong while creating the PDF.");
+    } finally {
+        exportPdfBtn.disabled = false;
+        exportPdfBtn.textContent = 'Export to PDF';
+    }
+}
+exportPdfBtn.addEventListener('click', exportToPdf);
+    </script>
+</body>
+</html>
