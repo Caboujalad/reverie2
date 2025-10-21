@@ -96,7 +96,7 @@
         /* --- NEW: SMART BORDER STYLES --- */
         .photo-slot {
             background-size: cover;
-            background-position: center;
+            /* background-position is now handled by JS */
             box-sizing: border-box;
             border: 1px dashed #ccc; /* Add a default border for empty slots */
         }
@@ -104,6 +104,7 @@
         /* Filled state: slots with a photo have no border */
         .photo-slot.has-photo {
             border: none;
+            cursor: grab; /* Indicate that the photo can be moved */
         }
 
         /* --- Layout styles updated to handle optional borders --- */
@@ -328,41 +329,50 @@
             bookPages.forEach((page, index) => {
                 const pageThumb = document.createElement('div');
                 pageThumb.className = 'page-thumbnail';
+
                 if (page.layout) {
                     pageThumb.innerHTML = layouts[page.layout].html;
                     pageThumb.classList.add(page.layout);
                     
-                    // Add the reset button to pages that have a layout
                     const resetBtn = document.createElement('button');
                     resetBtn.className = 'reset-page-btn';
-                    resetBtn.innerHTML = '&#8634;'; // Unicode for circular arrow
+                    resetBtn.innerHTML = '&#8634;';
                     resetBtn.title = "Reset page layout";
                     resetBtn.onclick = (e) => {
-                        e.stopPropagation(); // Stop click from opening layout chooser
+                        e.stopPropagation();
                         pageToReset = index;
                         resetModal.classList.add('active');
                     };
                     pageThumb.appendChild(resetBtn);
-                    
-                    // Populate with photos
-                    for (const [slotId, photoId] of Object.entries(page.photos)) {
-                        const slot = pageThumb.querySelector(`[data-slot-id="${slotId}"]`);
-                        if (slot && fileDataMap.has(photoId)) {
-                            slot.style.backgroundImage = `url(${fileDataMap.get(photoId).url})`;
-                            slot.classList.add('has-photo');
-                        }
-                    }
                 } else {
                     pageThumb.classList.add('page-thumbnail-placeholder');
                     pageThumb.textContent = `Page ${index + 1}`;
                 }
                 
-                // Event listeners remain the same
                 pageThumb.addEventListener('click', () => openLayoutChooser(index));
+                
                 pageThumb.querySelectorAll('.photo-slot').forEach(slot => {
+                    const slotId = slot.dataset.slotId;
+
+                    // If a photo exists for this slot, apply its styles and add panning listeners
+                    if (page.layout && page.photos[slotId]) {
+                        const photoData = page.photos[slotId];
+                        if (fileDataMap.has(photoData.photoId)) {
+                            slot.style.backgroundImage = `url(${fileDataMap.get(photoData.photoId).url})`;
+                            slot.classList.add('has-photo');
+                            slot.style.backgroundPosition = photoData.position;
+                            addPanListeners(slot, index, slotId);
+                        }
+                    }
+
+                    // Add a single, smart click listener to every slot.
+                    // This listener will only open the photo picker if the slot is empty.
                     slot.addEventListener('click', (event) => {
                         event.stopPropagation();
-                        openPhotoPicker(index, slot.dataset.slotId);
+                        // Check the book's data to see if the slot is empty before opening the picker.
+                        if (!bookPages[index].photos[slotId]) {
+                            openPhotoPicker(index, slotId);
+                        }
                     });
                 });
                 pageGrid.appendChild(pageThumb);
@@ -374,7 +384,6 @@
             for (const [key, value] of Object.entries(layouts)) {
                 const option = document.createElement('div');
                 option.className = `layout-option ${key}`;
-                // To make previews cleaner, we add the gap here just for the visual
                 option.style.gap = '2px';
                 option.innerHTML = value.html;
                 option.onclick = () => selectLayout(key);
@@ -409,13 +418,76 @@
                 photoPickerOptions.appendChild(img);
             }
         }
-        function selectPhoto(photoId) { /* Unchanged */
+        function selectPhoto(photoId) {
             if (activePageIndex !== null && activeSlotId !== null) {
-                bookPages[activePageIndex].photos[activeSlotId] = photoId;
+                bookPages[activePageIndex].photos[activeSlotId] = {
+                    photoId: photoId,
+                    position: '50% 50%' // Default position
+                };
                 renderPageGrid();
             }
             photoPickerModal.classList.remove('active');
         }
+
+        function addPanListeners(slot, pageIndex, slotId) {
+            let isPanning = false;
+            let startX, startY;
+            let startBgPosX, startBgPosY;
+
+            function onPanStart(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                isPanning = true;
+                slot.style.cursor = 'grabbing';
+
+                const bgPos = window.getComputedStyle(slot).backgroundPosition.split(' ');
+                startBgPosX = parseFloat(bgPos[0]);
+                startBgPosY = parseFloat(bgPos[1]);
+
+                startX = e.clientX || e.touches[0].clientX;
+                startY = e.clientY || e.touches[0].clientY;
+
+                document.addEventListener('mousemove', onPanMove);
+                document.addEventListener('mouseup', onPanEnd);
+                document.addEventListener('touchmove', onPanMove, { passive: false });
+                document.addEventListener('touchend', onPanEnd);
+            }
+
+            function onPanMove(e) {
+                if (!isPanning) return;
+                e.preventDefault();
+
+                const currentX = e.clientX || e.touches[0].clientX;
+                const currentY = e.clientY || e.touches[0].clientY;
+
+                const deltaX = currentX - startX;
+                const deltaY = currentY - startY;
+
+                const newBgPosX = startBgPosX + deltaX;
+                const newBgPosY = startBgPosY + deltaY;
+
+                slot.style.backgroundPosition = `${newBgPosX}px ${newBgPosY}px`;
+            }
+
+            function onPanEnd() {
+                if (!isPanning) return;
+                isPanning = false;
+                slot.style.cursor = 'grab';
+
+                if (bookPages[pageIndex] && bookPages[pageIndex].photos[slotId]) {
+                    bookPages[pageIndex].photos[slotId].position = slot.style.backgroundPosition;
+                }
+
+                document.removeEventListener('mousemove', onPanMove);
+                document.removeEventListener('mouseup', onPanEnd);
+                document.removeEventListener('touchmove', onPanMove);
+                document.removeEventListener('touchend', onPanEnd);
+            }
+
+            slot.addEventListener('mousedown', onPanStart);
+            slot.addEventListener('touchstart', onPanStart, { passive: false });
+        }
+
         [layoutModal, photoPickerModal].forEach(modal => { /* Unchanged */
             modal.addEventListener('click', (e) => {
                 if (e.target === modal) modal.classList.remove('active');
@@ -425,25 +497,18 @@
         // --- Reset Page Logic ---
         function resetPage(index) {
             if (index !== null) {
-                // Reset the page data in the bookPages array
                 bookPages[index] = { layout: null, photos: {} };
-                renderPageGrid(); // Re-render the whole grid to reflect the change
+                renderPageGrid();
             }
-            // Hide the modal
             resetModal.classList.remove('active');
             pageToReset = null;
         }
 
-        // Event listeners for the confirmation modal
-        confirmResetBtn.addEventListener('click', () => {
-            resetPage(pageToReset);
-        });
-
+        confirmResetBtn.addEventListener('click', () => resetPage(pageToReset));
         cancelResetBtn.addEventListener('click', () => {
             resetModal.classList.remove('active');
             pageToReset = null;
         });
-
         resetModal.addEventListener('click', (e) => {
             if (e.target === resetModal) {
                 resetModal.classList.remove('active');
@@ -460,7 +525,6 @@
             
             try {
                 const { jsPDF } = window.jspdf;
-                // A4 size in points: 595 x 842.
                 const pdfWidth = 595;
                 const pdfHeight = 842;
 
@@ -470,47 +534,35 @@
                 for (let i = 0; i < pageElements.length; i++) {
                     const originalPage = pageElements[i];
                     
-                    // --- HIGH-QUALITY EXPORT STRATEGY ---
-                    // 1. Create a large, off-screen clone of the page to render images at high resolution.
                     const clone = originalPage.cloneNode(true);
                     document.body.appendChild(clone);
                     clone.style.position = 'absolute';
-                    clone.style.left = '-9999px'; // Move it off-screen
+                    clone.style.left = '-9999px';
                     clone.style.top = '0px';
-                    clone.style.width = '1600px';  // A large width to force high-res rendering
-                    clone.style.height = '2262px'; // Maintain the new A4 aspect ratio (1600 * 297/210)
+                    clone.style.width = '1600px';
+                    clone.style.height = '2262px';
                     clone.style.margin = '0';
                     clone.style.border = 'none';
                     clone.style.boxShadow = 'none';
 
-                    // NEW: If borders are enabled, override the --gap variable for the clone
-                    // to make them thicker in the PDF.
                     if (addBorders) {
-                        clone.style.setProperty('--gap', '16px'); // Export with 16px gap for thicker lines
+                        clone.style.setProperty('--gap', '16px');
                     }
 
-                    // 2. Run html2canvas on the high-resolution clone
                     const canvas = await html2canvas(clone, {
-                        scale: 1, // No need for extra scaling as the source element is already large
+                        scale: 1,
                         useCORS: true,
                         logging: false,
                         onclone: (clonedDoc) => {
-                            // Ensure remove buttons AND reset buttons are not visible in the PDF screenshot
                             const allButtons = clonedDoc.querySelectorAll('.remove-photo-btn, .reset-page-btn');
                             allButtons.forEach(btn => btn.style.display = 'none');
                         }
                     });
 
-                    // 3. Remove the temporary clone from the DOM
                     document.body.removeChild(clone);
-
-                    // Use PNG for lossless compression to preserve quality
                     const imgData = canvas.toDataURL('image/png');
 
-                    if (i > 0) {
-                        doc.addPage();
-                    }
-                    // Add image to fill the entire page, removing margins and borders
+                    if (i > 0) doc.addPage();
                     doc.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
                 }
                 doc.save('reverie-photobook.pdf');
@@ -526,4 +578,5 @@
     </script>
 </body>
 </html>
+
 
