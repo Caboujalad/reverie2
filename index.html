@@ -4,8 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Reverie Book Designer</title>
-    <!-- PDF Generation Libraries -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <!-- PDF Generation Libraries --><script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 
     <style>
@@ -17,7 +16,11 @@
             --text-color: #34495e;
             --font-headings: 'Helvetica Neue', Helvetica, Arial, sans-serif;
             --font-body: 'Georgia', serif;
-            --gap: 0px; /* Keeping gap at 0 for seamless photo edges */
+            --gap: 0px; /* Default gap is 0. This will be overridden if borders are enabled. */
+        }
+        /* NEW: This class enables the borders by changing the --gap variable */
+        body.with-borders {
+            --gap: 4px; /* On-screen gap */
         }
         html { scroll-behavior: smooth; }
         body { font-family: var(--font-body); color: var(--text-color); background-color: var(--background-color); margin: 0; padding-top: 80px; }
@@ -29,6 +32,7 @@
         #setup-screen { text-align: center; padding: 60px 20px; }
         .setup-box { background: #fff; padding: 40px; border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); display: inline-block; }
         #page-count-input { width: 100px; text-align: center; font-size: 1.2em; padding: 10px; margin: 0 15px; }
+        .setup-options { margin: 20px 0; } /* Container for the checkbox */
         .btn { display: inline-block; background-color: var(--primary-color); color: #fff; padding: 12px 28px; text-decoration: none; border-radius: 5px; cursor: pointer; border: none; font-size: 1em; }
         #editor-screen { display: none; }
         .editor-grid { display: grid; grid-template-columns: 250px 1fr; gap: 30px; }
@@ -94,31 +98,31 @@
             background-size: cover;
             background-position: center;
             box-sizing: border-box;
-            /* Default state: empty slots have a thin border */
-            border: 1px solid #dde3ea;
+            border: 1px dashed #ccc; /* Add a default border for empty slots */
         }
+        
         /* Filled state: slots with a photo have no border */
         .photo-slot.has-photo {
             border: none;
         }
 
-        /* --- All layout styles are now simpler as they don't need calc() --- */
+        /* --- Layout styles updated to handle optional borders --- */
         .layout-1 .photo-slot { width: 100%; height: 100%; }
         .layout-2-horiz { flex-direction: row; }
-        .layout-2-horiz .photo-slot { width: 50%; height: 100%; }
+        .layout-2-horiz .photo-slot { width: calc(50% - var(--gap) / 2); height: 100%; }
         .layout-2-vert { flex-direction: column; }
-        .layout-2-vert .photo-slot { width: 100%; height: 50%; }
+        .layout-2-vert .photo-slot { width: 100%; height: calc(50% - var(--gap) / 2); }
         .layout-3-main-top { flex-wrap: wrap; }
-        .layout-3-main-top .photo-slot:first-child { width: 100%; height: 50%; }
-        .layout-3-main-top .photo-slot { width: 50%; height: 50%; }
+        .layout-3-main-top .photo-slot:first-child { width: 100%; height: calc(50% - var(--gap) / 2); }
+        .layout-3-main-top .photo-slot:not(:first-child) { width: calc(50% - var(--gap) / 2); height: calc(50% - var(--gap) / 2); }
         .layout-3-main-left { flex-wrap: nowrap; }
-        .layout-3-main-left .photo-slot:first-child { width: 50%; height: 100%; }
-        .layout-3-main-left .sub-column { width: 50%; height: 100%; display: flex; flex-direction: column; }
-        .layout-3-main-left .sub-column .photo-slot { width: 100%; height: 50%; }
+        .layout-3-main-left .photo-slot:first-child { width: calc(50% - var(--gap) / 2); height: 100%; }
+        .layout-3-main-left .sub-column { width: calc(50% - var(--gap) / 2); height: 100%; display: flex; flex-direction: column; gap: var(--gap); }
+        .layout-3-main-left .sub-column .photo-slot { width: 100%; height: calc(50% - var(--gap) / 2); }
         .layout-4-grid { flex-wrap: wrap; }
-        .layout-4-grid .photo-slot { width: 50%; height: 50%; }
+        .layout-4-grid .photo-slot { width: calc(50% - var(--gap) / 2); height: calc(50% - var(--gap) / 2); }
         .layout-4-vert-strip { flex-direction: column; }
-        .layout-4-vert-strip .photo-slot { width: 100%; height: 25%; }
+        .layout-4-vert-strip .photo-slot { width: 100%; height: calc(25% - var(--gap) * 3 / 4); }
 
         /* --- LAYOUT PREVIEW FIXES (for modal window) --- */
 /* These rules adjust the size of photo slots inside the small previews
@@ -196,8 +200,14 @@
     <div id="setup-screen" class="container"><div class="setup-box">
             <h2>Welcome to the Reverie Designer</h2>
             <p>How many pages will be in your photobook?</p>
-            <label for="page-count-input">Pages:</label>
-            <input type="number" id="page-count-input" value="20" min="2" max="100" step="2">
+            <div>
+                <label for="page-count-input">Pages:</label>
+                <input type="number" id="page-count-input" value="20" min="2" max="100" step="2">
+            </div>
+            <div class="setup-options">
+                <input type="checkbox" id="add-borders-checkbox">
+                <label for="add-borders-checkbox">Add thin white borders between photos</label>
+            </div>
             <button id="start-btn" class="btn">Start Designing</button>
         </div>
     </div>
@@ -247,11 +257,13 @@
         let activePageIndex = null;
         let activeSlotId = null;
         let pageToReset = null;
+        let addBorders = false; // Flag to track user's border preference
 
         const setupScreen = document.getElementById('setup-screen');
         const editorScreen = document.getElementById('editor-screen');
         const startBtn = document.getElementById('start-btn');
         const pageCountInput = document.getElementById('page-count-input');
+        const addBordersCheckbox = document.getElementById('add-borders-checkbox');
         const pageGrid = document.getElementById('page-grid');
         const photosUpload = document.getElementById('photos-upload');
         const photoTray = document.getElementById('photo-tray');
@@ -274,8 +286,16 @@
         };
 
         // --- Core Functions ---
-        startBtn.addEventListener('click', () => { /* Unchanged */
+        startBtn.addEventListener('click', () => {
             const pageCount = parseInt(pageCountInput.value);
+            addBorders = addBordersCheckbox.checked; // Capture user's border preference
+
+            if (addBorders) {
+                document.body.classList.add('with-borders');
+            } else {
+                document.body.classList.remove('with-borders'); // Ensure it's removed if unchecked
+            }
+
             if (pageCount > 0 && pageCount % 2 === 0) {
                 initializeBook(pageCount);
                 setupScreen.style.display = 'none';
@@ -462,6 +482,12 @@
                     clone.style.margin = '0';
                     clone.style.border = 'none';
                     clone.style.boxShadow = 'none';
+
+                    // NEW: If borders are enabled, override the --gap variable for the clone
+                    // to make them thicker in the PDF.
+                    if (addBorders) {
+                        clone.style.setProperty('--gap', '8px'); // Export with 8px gap for thicker lines
+                    }
 
                     // 2. Run html2canvas on the high-resolution clone
                     const canvas = await html2canvas(clone, {
