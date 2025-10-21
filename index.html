@@ -43,7 +43,40 @@
         cursor: pointer;
     }
         #page-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 20px; }
-        .page-thumbnail { background: #fff; aspect-ratio: 210 / 297; border: 1px solid #ddd; border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); cursor: pointer; transition: transform 0.2s, box-shadow 0.2s; display: flex; gap: var(--gap); }
+        .page-thumbnail { 
+            position: relative; /* Needed for positioning the reset button */
+            background: #fff; 
+            aspect-ratio: 210 / 297; 
+            border: 1px solid #ddd; 
+            border-radius: 4px; 
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1); 
+            cursor: pointer; 
+            transition: transform 0.2s, box-shadow 0.2s; 
+            display: flex; 
+            gap: var(--gap); 
+        }
+        .reset-page-btn {
+            position: absolute;
+            top: 5px;
+            left: 5px;
+            width: 22px;
+            height: 22px;
+            background: rgba(44, 62, 80, 0.7); /* --primary-color with transparency */
+            color: white;
+            border: none;
+            border-radius: 50%;
+            cursor: pointer;
+            font-size: 14px;
+            line-height: 22px;
+            text-align: center;
+            opacity: 0;
+            transition: opacity 0.2s;
+            z-index: 10;
+            font-weight: bold;
+        }
+        .page-thumbnail:hover .reset-page-btn {
+            opacity: 1;
+        }
         .page-thumbnail:hover { transform: scale(1.03); box-shadow: 0 4px 15px rgba(0,0,0,0.15); }
         .page-thumbnail-placeholder { justify-content: center; align-items: center; color: #aaa; }
         .modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); z-index: 2000; display: none; justify-content: center; align-items: center; }
@@ -92,7 +125,7 @@
 
         /* --- LAYOUT PREVIEW FIXES (for modal window) --- */
 /* These rules adjust the size of photo slots inside the small previews
-   to account for the 2px gap between them, ensuring they fit perfectly. */
+    to account for the 2px gap between them, ensuring they fit perfectly. */
 .layout-option.layout-2-horiz .photo-slot { width: calc(50% - 1px); }
 .layout-option.layout-2-vert .photo-slot { height: calc(50% - 1px); }
 .layout-option.layout-3-main-top .photo-slot { height: calc(50% - 1px); }
@@ -106,7 +139,7 @@
 }
 .layout-option.layout-4-vert-strip .photo-slot {
     /* 4 items have 3 gaps. Total gap height is 2px * 3 = 6px.
-       Each slot's height is (100% - 6px) / 4 */
+        Each slot's height is (100% - 6px) / 4 */
     height: calc(25% - 1.5px);
 }
 
@@ -152,9 +185,9 @@
     
     /* --- THIS IS THE FIX --- */
     #layout-options {
-        flex-wrap: wrap;           /* Allow items to wrap to the next line */
-        justify-content: center;   /* Center the items nicely */
-        overflow-x: hidden;        /* Hide the horizontal scrollbar */
+        flex-wrap: wrap;          /* Allow items to wrap to the next line */
+        justify-content: center;  /* Center the items nicely */
+        overflow-x: hidden;       /* Hide the horizontal scrollbar */
         padding-bottom: 15px;
     }
 }
@@ -198,13 +231,26 @@
         </div>
     </div>
 
+    <div id="reset-modal" class="modal">
+        <div class="modal-content">
+            <h3>Reset Page</h3>
+            <p>Are you sure you want to clear this page? All photos will be removed.</p>
+            <div style="display: flex; justify-content: center; gap: 20px; margin-top: 20px;">
+                <button id="cancel-reset-btn" class="btn" style="background-color: #7f8c8d;">Cancel</button>
+                <button id="confirm-reset-btn" class="btn" style="background-color: #c0392b;">Yes, Reset</button>
+            </div>
+        </div>
+    </div>
+
     <script>
-        // --- STATE & DOM (unchanged) ---
+        // --- STATE & DOM ---
         let bookPages = [];
         const fileDataMap = new Map();
         let idCounter = 0;
         let activePageIndex = null;
         let activeSlotId = null;
+        let pageToReset = null;
+
         const setupScreen = document.getElementById('setup-screen');
         const editorScreen = document.getElementById('editor-screen');
         const startBtn = document.getElementById('start-btn');
@@ -216,6 +262,9 @@
         const layoutOptionsContainer = document.getElementById('layout-options');
         const photoPickerModal = document.getElementById('photo-picker-modal');
         const photoPickerOptions = document.getElementById('photo-picker-options');
+        const resetModal = document.getElementById('reset-modal');
+        const confirmResetBtn = document.getElementById('confirm-reset-btn');
+        const cancelResetBtn = document.getElementById('cancel-reset-btn');
 
         const layouts = { /* Unchanged */ 
             'layout-1': { slots: 1, html: `<div class="photo-slot" data-slot-id="1"></div>` },
@@ -236,11 +285,13 @@
                 editorScreen.style.display = 'block';
             } else { alert("Please enter an even number of pages."); }
         });
+
         function initializeBook(pageCount) { /* Unchanged */
             bookPages = Array(pageCount).fill(null).map(() => ({ layout: null, photos: {} }));
             renderPageGrid();
             populateLayoutOptions();
         }
+
         photosUpload.addEventListener('change', (event) => { /* Unchanged */
             const newFiles = Array.from(event.target.files);
             newFiles.forEach(file => {
@@ -255,7 +306,6 @@
             });
         });
         
-        // --- THIS FUNCTION CONTAINS THE KEY CHANGE ---
         function renderPageGrid() {
             pageGrid.innerHTML = '';
             bookPages.forEach((page, index) => {
@@ -265,13 +315,23 @@
                     pageThumb.innerHTML = layouts[page.layout].html;
                     pageThumb.classList.add(page.layout);
                     
+                    // Add the reset button to pages that have a layout
+                    const resetBtn = document.createElement('button');
+                    resetBtn.className = 'reset-page-btn';
+                    resetBtn.innerHTML = '&#8634;'; // Unicode for circular arrow
+                    resetBtn.title = "Reset page layout";
+                    resetBtn.onclick = (e) => {
+                        e.stopPropagation(); // Stop click from opening layout chooser
+                        pageToReset = index;
+                        resetModal.classList.add('active');
+                    };
+                    pageThumb.appendChild(resetBtn);
+                    
                     // Populate with photos
                     for (const [slotId, photoId] of Object.entries(page.photos)) {
                         const slot = pageThumb.querySelector(`[data-slot-id="${slotId}"]`);
                         if (slot && fileDataMap.has(photoId)) {
                             slot.style.backgroundImage = `url(${fileDataMap.get(photoId).url})`;
-                            // --- JAVASCRIPT FIX ---
-                            // Add the .has-photo class to hide the border
                             slot.classList.add('has-photo');
                         }
                     }
@@ -344,75 +404,103 @@
                 if (e.target === modal) modal.classList.remove('active');
             });
         });
-        // --- PDF EXPORT FUNCTIONALITY ---
 
-// Add this line to your variables at the top of the script
-const exportPdfBtn = document.getElementById('export-pdf-btn');
-
-// Add this function and the event listener at the end of your script
-async function exportToPdf() {
-    exportPdfBtn.disabled = true;
-    exportPdfBtn.textContent = 'Exporting...';
-    
-    try {
-        const { jsPDF } = window.jspdf;
-        // A4 size in points: 595 x 842.
-        const pdfWidth = 595;
-        const pdfHeight = 842;
-
-        const doc = new jsPDF('p', 'pt', 'a4');
-        const pageElements = document.querySelectorAll('.page-thumbnail');
-
-        for (let i = 0; i < pageElements.length; i++) {
-            const originalPage = pageElements[i];
-            
-            // --- HIGH-QUALITY EXPORT STRATEGY ---
-            // 1. Create a large, off-screen clone of the page to render images at high resolution.
-            const clone = originalPage.cloneNode(true);
-            document.body.appendChild(clone);
-            clone.style.position = 'absolute';
-            clone.style.left = '-9999px'; // Move it off-screen
-            clone.style.top = '0px';
-            clone.style.width = '1600px';  // A large width to force high-res rendering
-            clone.style.height = '2262px'; // Maintain the new A4 aspect ratio (1600 * 297/210)
-            clone.style.margin = '0';
-            clone.style.border = 'none';
-            clone.style.boxShadow = 'none';
-
-            // 2. Run html2canvas on the high-resolution clone
-            const canvas = await html2canvas(clone, {
-                scale: 1, // No need for extra scaling as the source element is already large
-                useCORS: true,
-                logging: false,
-                onclone: (clonedDoc) => {
-                    // Ensure remove buttons are not visible in the PDF screenshot of the clone
-                    const removeButtons = clonedDoc.querySelectorAll('.remove-photo-btn');
-                    removeButtons.forEach(btn => btn.style.display = 'none');
-                }
-            });
-
-            // 3. Remove the temporary clone from the DOM
-            document.body.removeChild(clone);
-
-            // Use PNG for lossless compression to preserve quality
-            const imgData = canvas.toDataURL('image/png');
-
-            if (i > 0) {
-                doc.addPage();
+        // --- Reset Page Logic ---
+        function resetPage(index) {
+            if (index !== null) {
+                // Reset the page data in the bookPages array
+                bookPages[index] = { layout: null, photos: {} };
+                renderPageGrid(); // Re-render the whole grid to reflect the change
             }
-            // Add image to fill the entire page, removing margins and borders
-            doc.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+            // Hide the modal
+            resetModal.classList.remove('active');
+            pageToReset = null;
         }
-        doc.save('reverie-photobook.pdf');
-    } catch (error) {
-        console.error("Failed to export PDF:", error);
-        alert("Sorry, something went wrong while creating the PDF.");
-    } finally {
-        exportPdfBtn.disabled = false;
-        exportPdfBtn.textContent = 'Export to PDF';
-    }
-}
-exportPdfBtn.addEventListener('click', exportToPdf);
+
+        // Event listeners for the confirmation modal
+        confirmResetBtn.addEventListener('click', () => {
+            resetPage(pageToReset);
+        });
+
+        cancelResetBtn.addEventListener('click', () => {
+            resetModal.classList.remove('active');
+            pageToReset = null;
+        });
+
+        resetModal.addEventListener('click', (e) => {
+            if (e.target === resetModal) {
+                resetModal.classList.remove('active');
+                pageToReset = null;
+            }
+        });
+
+        // --- PDF EXPORT FUNCTIONALITY ---
+        const exportPdfBtn = document.getElementById('export-pdf-btn');
+
+        async function exportToPdf() {
+            exportPdfBtn.disabled = true;
+            exportPdfBtn.textContent = 'Exporting...';
+            
+            try {
+                const { jsPDF } = window.jspdf;
+                // A4 size in points: 595 x 842.
+                const pdfWidth = 595;
+                const pdfHeight = 842;
+
+                const doc = new jsPDF('p', 'pt', 'a4');
+                const pageElements = document.querySelectorAll('.page-thumbnail');
+
+                for (let i = 0; i < pageElements.length; i++) {
+                    const originalPage = pageElements[i];
+                    
+                    // --- HIGH-QUALITY EXPORT STRATEGY ---
+                    // 1. Create a large, off-screen clone of the page to render images at high resolution.
+                    const clone = originalPage.cloneNode(true);
+                    document.body.appendChild(clone);
+                    clone.style.position = 'absolute';
+                    clone.style.left = '-9999px'; // Move it off-screen
+                    clone.style.top = '0px';
+                    clone.style.width = '1600px';  // A large width to force high-res rendering
+                    clone.style.height = '2262px'; // Maintain the new A4 aspect ratio (1600 * 297/210)
+                    clone.style.margin = '0';
+                    clone.style.border = 'none';
+                    clone.style.boxShadow = 'none';
+
+                    // 2. Run html2canvas on the high-resolution clone
+                    const canvas = await html2canvas(clone, {
+                        scale: 1, // No need for extra scaling as the source element is already large
+                        useCORS: true,
+                        logging: false,
+                        onclone: (clonedDoc) => {
+                            // Ensure remove buttons AND reset buttons are not visible in the PDF screenshot
+                            const allButtons = clonedDoc.querySelectorAll('.remove-photo-btn, .reset-page-btn');
+                            allButtons.forEach(btn => btn.style.display = 'none');
+                        }
+                    });
+
+                    // 3. Remove the temporary clone from the DOM
+                    document.body.removeChild(clone);
+
+                    // Use PNG for lossless compression to preserve quality
+                    const imgData = canvas.toDataURL('image/png');
+
+                    if (i > 0) {
+                        doc.addPage();
+                    }
+                    // Add image to fill the entire page, removing margins and borders
+                    doc.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+                }
+                doc.save('reverie-photobook.pdf');
+            } catch (error) {
+                console.error("Failed to export PDF:", error);
+                alert("Sorry, something went wrong while creating the PDF.");
+            } finally {
+                exportPdfBtn.disabled = false;
+                exportPdfBtn.textContent = 'Export to PDF';
+            }
+        }
+        exportPdfBtn.addEventListener('click', exportToPdf);
     </script>
 </body>
 </html>
+
